@@ -16,10 +16,7 @@ kubernetes.core
 
 == Known Issues
 
-- Seems to have problems with content size on ICSP because last-applied-configuration duplicates the content. Mayneed to just remove that field or remove the object entirely.
-
-- Would be good to add a pause to MCP rollout before and after applying changes to allow them to be one sync.
-
+- Seems to have problems with content size on ICSP because last-applied-configuration duplicates the content. May need to just remove that field or remove the object entirely.
 
 == License
 

@@ -1,0 +1,13 @@
+- name: Unpause MachineConfigPools
+  k8s:
+    state: present
+    definition:
+      apiVersion: machineconfiguration.openshift.io/v1 
+      kind: MachineConfigPool
+      metadata:
+        name: "{{ item }}"
+      spec:
+        paused: false
+  loop:
+    - master
+    - worker
