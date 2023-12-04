@@ -1,0 +1,30 @@
+= change_registry Ansible Role
+
+Allows one to update an existing pull secret, ImageContentSourcePolicy, and CatalogSource to point to a new registry URL
+
+== Requirements
+
+KUBECONFIG is defined and logged in.
+
+== Role Variables
+
+include::roles/change_registry/defaults/main.yml[]
+
+== Dependencies
+
+kubernetes.core
+
+== Known Issues
+
+- Seems to have problems with content size on ICSP because last-applied-configuration duplicates the content. Mayneed to just remove that field or remove the object entirely.
+
+- Would be good to add a pause to MCP rollout before and after applying changes to allow them to be one sync.
+
+
+== License
+
+MIT
+
+== Author Information
+
+Brian Ward

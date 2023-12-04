@@ -1,0 +1,7 @@
+---
+old_registry: "registry.example.com"
+new_registry: "registryNEW.example.com"
+new_creds:
+  username: user
+  password: pass
+backup_dir: /tmp/change_registry

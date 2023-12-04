@@ -1,0 +1,5 @@
+- name: Update Registry
+  hosts: localhost
+  tasks:
+    - include_role:
+        name: change_registry 

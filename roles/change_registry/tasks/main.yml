@@ -1,0 +1,12 @@
+---
+- name: Backup directory exists
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    mode: '0755'
+
+- include_tasks: update_pull_secret.yml
+
+- include_tasks: update_icsp.yml
+
+- include_tasks: update_catalogsource.yml

@@ -1,0 +1,27 @@
+- name: Get backup of CatalogSource
+  k8s_info:
+    kind: CatalogSource
+    api_version: operators.coreos.com/v1alpha1
+  register: current_catalogsource
+
+- name: Write CatalogSource to file
+  copy: 
+    content: "{{ current_catalogsource.resources | to_nice_yaml }}"
+    dest: "{{ (backup_dir, 'current_catalogsource.yaml') | path_join }}"
+    backup: true
+
+- name: Update registry hostname
+  set_fact:
+    updated_catalogsource: "{{ current_catalogsource | regex_replace(old_registry,new_registry) }}"
+
+- name: Write new CatalogSource to file
+  copy:
+    content: "{{ updated_catalogsource.resources | to_nice_yaml }}"
+    dest: "{{ (backup_dir, 'updated_catalogsource.yaml') | path_join }}"
+    backup: true
+
+- name: Apply CatalogSource changes to cluster
+  k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ updated_catalogsource.resources }}"

@@ -1,0 +1,27 @@
+- name: Get backup of ICSP
+  k8s_info:
+    kind: ImageContentSourcePolicy
+    api_version: operator.openshift.io/v1alpha1
+  register: current_icsp
+
+- name: Write ICSP to file
+  copy: 
+    content: "{{ current_icsp.resources | to_nice_yaml }}"
+    dest: "{{ (backup_dir, 'current_icsp.yaml') | path_join }}"
+    backup: true
+
+- name: Update registry hostname
+  set_fact:
+    updated_icsp: "{{ current_icsp | regex_replace(old_registry,new_registry) }}"
+
+- name: Write new ICSP to file
+  copy:
+    content: "{{ updated_icsp.resources | to_nice_yaml }}"
+    dest: "{{ (backup_dir, 'updated_icsp.yaml') | path_join }}"
+    backup: true
+
+- name: Apply ICSP changes to cluster
+  k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ updated_icsp.resources }}"
