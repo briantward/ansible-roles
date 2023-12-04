@@ -8,7 +8,7 @@ KUBECONFIG is defined and logged in.
 
 == Role Variables
 
-include::roles/change_registry/defaults/main.yml[]
+include::defaults/main.yml[]
 
 == Dependencies
 
