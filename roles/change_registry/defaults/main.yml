@@ -5,3 +5,4 @@ new_creds:
   username: user
   password: pass
 backup_dir: /tmp/change_registry
+resume_mcp: false
