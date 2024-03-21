@@ -1,0 +1,25 @@
+- name: Get current console plugin list
+  shell: "oc get Console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}'"
+  register: console_plugins
+
+- set_fact:
+    plugins: "{{ console_plugins.stdout }}"
+
+- name: Add new entries to plugin list
+  set_fact:
+    plugins: "{{ plugins | union(add_plugins) | unique }}"
+
+- name: Remove entries from plugin list
+  set_fact:
+    plugins: "{{ plugins | difference(remove_plugins) }}"
+
+- name: Update console on cluster
+  kubernetes.core.k8s_json_patch:
+    name: cluster
+    namespace: ""
+    api_version: operator.openshift.io/v1
+    kind: Console
+    patch:
+      - op: replace
+        path: /spec/plugins
+        value: "{{ plugins }}"

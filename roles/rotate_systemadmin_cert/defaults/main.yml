@@ -1,0 +1,10 @@
+ca_name: custom
+ca_validity: 3650
+ca_cn: "admin-kubeconfig-signer-{{ ca_name }}"
+ca_ou: "openshift"
+ca_subject: "/OU={{ ca_ou }}/CN={{ ca_cn }}"
+cert_user: "system:admin"
+cert_group: "system:masters"
+cert_subject: "/O={{ cert_group }}/CN={{ cert_user }}"
+revoke_existing: true
+existing_lost: false

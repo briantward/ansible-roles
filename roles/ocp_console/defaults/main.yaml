@@ -1,0 +1,5 @@
+plugins: []
+add_plugins: 
+  - test-add
+remove_plugins:
+  - test-remove

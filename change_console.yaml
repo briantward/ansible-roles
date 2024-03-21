@@ -1,0 +1,11 @@
+---
+- name: update console plugins
+  hosts: localhost
+  tasks:
+  - ansible.builtin.include_role:
+      name: ocp_console
+    vars: 
+      add_plugins: 
+        - my-test-add
+      remove_plugins:
+        - my-test-remove
