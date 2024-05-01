@@ -1,0 +1,6 @@
+cert_dir: "{{ cert_working_dir | expanduser }}"
+kc_dir: "{{ kc_working_dir | expanduser }}"
+ca_crt: "{{ cert_dir }}/{{ ca_name }}.crt"
+ca_key: "{{ cert_dir }}/{{ ca_name }}.key"
+kc_crt: "{{ kc_dir }}/{{ cert_user }}.crt"
+kc_key: "{{ kc_dir }}/{{ cert_user }}.key"

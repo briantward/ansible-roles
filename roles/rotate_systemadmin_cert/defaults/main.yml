@@ -7,4 +7,6 @@ cert_user: "system:admin"
 cert_group: "system:masters"
 cert_subject: "/O={{ cert_group }}/CN={{ cert_user }}"
 revoke_existing: true
-existing_lost: false
+cert_working_dir: "~/ocp-kubeconfig-cert"
+kc_working_dir: "~/ocp-kubeconfig-cert"
+kc_existing_revoke: ""

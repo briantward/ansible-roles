@@ -1,6 +1,15 @@
 # Check KUBECONFIG is set
 # Check current user/context in KUBECONFIG has access to edit apiserver/cluster and create configmaps in openshift-config ns
 
+- name: Prepare storage
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ cert_dir }}"
+    - "{{ kc_dir }}"
+
 - name: Check access to apiserver object
   kubernetes.core.k8s_info:
     kind: apiserver
@@ -11,47 +20,36 @@
   shell: "oc config current-context"
   register: current_context
   changed_when: false
-  when: not existing_lost
 
-- name: "Get the current user of the current context"
+- name: "Get the current user"
   shell: "oc config view -o jsonpath='{.contexts[?(@.name == \"{{ current_context.stdout }}\")].context.user}'"
   register: current_user
   changed_when: false
-  when: not existing_lost
 
-- name: "Check that a token for the current user is not present -- need to identify which certificate will be revoked"
-  shell: "oc config view -o jsonpath='{users[?(@.name == \"{{ current_user.stdout }}\")].user.token}'"
-  register: current_user_token
+- name: "Get the current cluster"
+  shell: "oc config view -o jsonpath='{.contexts[?(@.name == \"{{ current_context.stdout }}\")].context.cluster}'"
+  register: current_cluster
   changed_when: false
-  failed_when: current_user_token.stdout != ""
-  when: not existing_lost
-
-- name: "Check that a certificate for the current user is present -- need to identify which certificate will be revoked"
-  shell: "oc config view -o jsonpath='{.users[?(@.name == \"{{ current_user.stdout }}\")].user.client-certificate-data}'"
-  register: current_user_certificate
-  changed_when: false
-  failed_when: current_user_certificate.stdout ~= "REDACTED"
-  when: not existing_lost
 
 - name: Check whether CA certificate exists
   stat:
-    path: "{{ ca_name }}.crt"
+    path: "{{ ca_crt }}"
   register: ca_certificate_exists
 
 - name: Read existing certificate if exists
   community.crypto.x509_certificate_info:
-    path: "{{ ca_name }}.crt"
+    path: "{{ ca_crt }}"
   when: ca_certificate_exists.stat.exists
   register: ca_certificate_info
 
 - block:
   - name: Create CA private key
     community.crypto.openssl_privatekey:
-      path: "{{ ca_name }}.key"
+      path: "{{ ca_key }}"
   
   - name: Create certificate signing request (CSR) for CA certificate
     community.crypto.openssl_csr_pipe:
-      privatekey_path: "{{ ca_name }}.key"
+      privatekey_path: "{{ ca_key }}"
       common_name: "{{ ca_cn }}"
       organizational_unit_name: "{{ ca_ou }}"
       use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
@@ -65,49 +63,49 @@
   
   - name: Create self-signed CA certificate from CSR
     community.crypto.x509_certificate:
-      path: "{{ ca_name }}.crt"
+      path: "{{ ca_crt }}"
       csr_content: "{{ ca_csr.csr }}"
-      privatekey_path: "{{ ca_name }}.key"
+      privatekey_path: "{{ ca_key }}"
       provider: selfsigned
 
   when: not ca_certificate_exists.stat.exists or (ca_certificate_info is defined and (ca_certificate_info.subject.commonName != ca_cn or ca_certificate_info.subject.organizationalUnitName != ca_ou))
 
 - name: Re-Read existing certificate
   community.crypto.x509_certificate_info:
-    path: "{{ ca_name }}.crt"
+    path: "{{ ca_crt }}"
   register: ca_certificate_info
 
 - name: Assert certificate is as required
   assert:
     that:
-      - "ca_certificate_info.subject.commonName == '{{ ca_cn }}'"
-      - "ca_certificate_info.subject.organizationalUnitName == '{{ ca_ou }}'"
+      - "ca_certificate_info.subject.commonName == ca_cn"
+      - "ca_certificate_info.subject.organizationalUnitName == ca_ou"
 
 - name: Check whether certificate exists
   stat:
-    path: "{{ cert_user }}.crt"
+    path: "{{ kc_crt }}"
   register: certificate_exists
 
 - name: Read existing certificate if exists
   slurp:
-    src: "{{ cert_user }}.crt"
+    src: "{{ kc_crt }}"
   when: certificate_exists.stat.exists
   register: certificate
 
 - name: Read existing certificate if exists
   community.crypto.x509_certificate_info:
-    path: "{{ cert_user }}.crt"
+    path: "{{ kc_crt }}"
   when: certificate_exists.stat.exists
   register: certificate_info
 
 - block:
   - name: Create private key for new certificate
     community.crypto.openssl_privatekey:
-      path: "{{ cert_user }}.key"
+      path: "{{ kc_key }}"
   
   - name: Create certificate signing request (CSR) for new certificate
     community.crypto.openssl_csr_pipe:
-      privatekey_path: "{{ cert_user }}.key"
+      privatekey_path: "{{ kc_key }}"
       common_name: "{{ cert_user }}"
       organization_name: "{{ cert_group }}"
     register: csr
@@ -117,28 +115,28 @@
       content: "{{ (certificate.content | b64decode) if certificate_exists.stat.exists else omit }}"
       csr_content: "{{ csr.csr }}"
       provider: ownca
-      ownca_path: "{{ ca_name }}.crt"
-      ownca_privatekey_path: "{{ ca_name }}.key"
+      ownca_path: "{{ ca_crt }}"
+      ownca_privatekey_path: "{{ ca_key }}"
       ownca_not_after: "+{{ ca_validity }}d"
     register: certificate
   
   - name: Write certificate to file
     copy:
-      dest: "{{ cert_user }}.crt"
+      dest: "{{ kc_crt }}"
       content: "{{ certificate.certificate }}"
 
   when: not certificate_exists.stat.exists or (certificate_info is defined and (certificate_info.subject.commonName != cert_user or certificate_info.subject.organizationName != cert_group))
 
 - name: Re-Read existing certificate
   community.crypto.x509_certificate_info:
-    path: "{{ cert_user }}.crt"
+    path: "{{ kc_crt }}"
   register: certificate_info
 
 - name: Assert certificate is as required
   assert:
     that:
-      - "certificate_info.subject.commonName == '{{ cert_user }}'"
-      - "certificate_info.subject.organizationName == '{{ cert_group }}'"
+      - "certificate_info.subject.commonName == cert_user"
+      - "certificate_info.subject.organizationName == cert_group"
 
 # should mandate specifying your KUBECONFIG, even if the "default" location?
 
@@ -146,19 +144,16 @@
   k8s_info:
     kind: Node
 
-#TODO: Validate that your new kubeconfig is different from the existing kubeconfig cert, if so, stop
-#otherwise we will error out on "Validate existing kubeconfig now fails" 
-
 - name: create CA configmap
   k8s:
     definition:
       apiVersion: v1
       kind: ConfigMap
-      metadata:
+      metadata: # consider using generateName, subsequent broken reruns could overwrite this
         name: "admin-kubeconfig-client-ca-{{ ca_name }}"
         namespace: openshift-config
       data:
-        ca-bundle.crt: "{{ lookup('file','{{ ca_name }}.crt') }}"
+        ca-bundle.crt: "{{ lookup('file','{{ ca_crt }}') }}"
 
 - name: patch the APIServer
   kubernetes.core.k8s:
@@ -193,108 +188,32 @@
 - name: "remove stale temp kubeconfig"
   file:
     state: absent
-    path: "kubeconfig.edit"
+    path: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: "Backup existing kubeconfig"
   copy:
     src: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
-    dest: "kubeconfig-backup.{{ ansible_date_time.iso8601_basic_short }}"
+    dest: "{{ kc_dir }}/kubeconfig-backup.{{ ansible_date_time.iso8601_basic_short }}"
 
 - name: "Create working copy of kubeconfig"
-  copy:
-    src: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
-    dest: "kubeconfig.edit"
+  shell: "oc config new-admin-kubeconfig >> {{ kc_dir }}/kubeconfig.edit"
       
-      #- name: "Delete {{ cert_user }} user if it is already present"
-      #  shell: "oc config delete-user '{{ cert_user }}'"
-      #  #changed_when: false
-      #  environment: 
-      #    KUBECONFIG: "kubeconfig.edit"
-      #
-      #- name: "Set certificate based user and credentials"
-      #  shell: "oc config set-credentials '{{ cert_user }}' --client-certificate='{{ cert_user }}.crt' --client-key='{{ cert_user }}.key' --embed-certs"
-      #  # TODO: changed_when: conditions
-      #  environment: 
-      #    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Get current context"
-  shell: "oc config current-context"
-  register: current_context
-  changed_when: false
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Get the cluster name of the current context"
-  shell: "oc config view -o jsonpath='{.contexts[?(@.name == \"{{ cert_user }}\")].context.cluster}'"
-  register: cluster_name
-  changed_when: false
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Get all clusters"
-  shell: "oc config get-clusters"
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-  register: kubeconfig_clusters
-
-- name: "Delete all clusters except for current one"
-  shell: "oc config delete-cluster '{{ item }}'"
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-  loop: "{{ kubeconfig_clusters.stdout_lines | difference(cluster_name.stdout_lines) | difference(['NAME']) | list}}"
-
-- name: "Get all users"
-  shell: "oc config get-users"
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-  register: kubeconfig_users
-
-- name: "Delete all users"
-  shell: "oc config delete-user '{{item}}'"
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-  loop: "{{ kubeconfig_users.stdout_lines | difference(['NAME']) | list }}"
-
 - name: "Set certificate based user and credentials"
-  shell: "oc config set-credentials '{{ cert_user }}' --client-certificate='{{ cert_user }}.crt' --client-key='{{ cert_user }}.key' --embed-certs"
+  shell: "oc config set-credentials '{{ cert_user }}' --client-certificate='{{ kc_crt }}' --client-key='{{ kc_key }}' --embed-certs"
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
-
-    #- name: "Delete {{ cert_user }} context if it is already present"
-    #  shell: "oc config delete-context '{{ cert_user }}'"
-    #  #changed_when: false
-    #  environment: 
-    #    KUBECONFIG: "kubeconfig.edit"
-
-      #- name: "Create new context entry for the user, certificate based credentials, and set current"
-      #  shell: "oc config set-context '{{ cert_user }}' --user='{{ cert_user }}' --cluster='{{ cluster_name.stdout }}'"
-      #  # TODO: changed_when: conditions
-      #  environment: 
-      #    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Get list of all contexts"
-  shell: "oc config get-contexts -o name"
-  register: kubeconfig_contexts
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Delete all present contexts"
-  shell: "oc config delete-context '{{ item }}'"
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
-
-- name: "Set {{ cert_user }} as current-context"
-  shell: "oc config use-context '{{ cert_user }}'"
-  #changed_when: false
-  environment: 
-    KUBECONFIG: "kubeconfig.edit"
+- name: "Update context entry for new user, certificate based credentials"
+  shell: "oc config set-context admin --user='{{ cert_user }}'"
+  # TODO: changed_when: conditions
+  environment:
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: Validate new kubeconfig
   k8s_info:
     kind: Node
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: Revoke old CA by replacing it with the new one
   k8s:
@@ -305,11 +224,11 @@
         name: "admin-kubeconfig-client-ca"
         namespace: openshift-config
       data:
-        ca-bundle.crt: "{{ lookup('file','{{ ca_name }}.crt') }}"
+        ca-bundle.crt: "{{ lookup('file','{{ ca_crt }}') }}"
   when: revoke_existing
   register: revoked
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: Sleep for a moment to allow system to register change
   ansible.builtin.wait_for:
@@ -329,7 +248,7 @@
   retries: 30
   delay: 10
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: remove the APIserver patch
   kubernetes.core.k8s_json_patch:
@@ -343,7 +262,7 @@
   when: revoke_existing
   register: removed_test_ca
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: Sleep for a moment to allow system to register change
   ansible.builtin.wait_for:
@@ -363,7 +282,7 @@
   retries: 30
   delay: 10
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: remove the additional configmap
   k8s:
@@ -373,21 +292,20 @@
     state: absent
   when: revoke_existing
   environment: 
-    KUBECONFIG: "kubeconfig.edit"
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
 
 - name: Validate existing kubeconfig now fails
   k8s_info:
-    kind: Node
-  register: get_nodes
-  failed_when: get_nodes.resources is defined
-  when: not existing_lost
+    kind: apiServer
+  register: get_apiserver
+  failed_when: get_apiserver.resources is defined
 
 - name: "Create new kubeconfig"
   copy:
-    src: "kubeconfig.edit"
-    dest: "kubeconfig.new"
+    src: "{{ kc_dir }}/kubeconfig.edit"
+    dest: "{{ kc_dir }}/kubeconfig.new"
 
 - name: "remove temp kubeconfig"
   file:
     state: absent
-    path: "kubeconfig.edit"
+    path: "{{ kc_dir }}/kubeconfig.edit"
