@@ -1,0 +1,106 @@
+- name: Check whether CA certificate exists
+  stat:
+    path: "{{ ca_crt }}"
+  register: ca_certificate_exists
+
+- name: Read existing certificate if exists
+  community.crypto.x509_certificate_info:
+    path: "{{ ca_crt }}"
+  when: ca_certificate_exists.stat.exists
+  register: ca_certificate_info
+
+- block:
+  - name: Create CA private key
+    community.crypto.openssl_privatekey:
+      path: "{{ ca_key }}"
+  
+  - name: Create certificate signing request (CSR) for CA certificate
+    community.crypto.openssl_csr_pipe:
+      privatekey_path: "{{ ca_key }}"
+      common_name: "{{ ca_cn }}"
+      organizational_unit_name: "{{ ca_ou }}"
+      use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
+      basic_constraints:
+        - 'CA:TRUE'
+      basic_constraints_critical: true
+      key_usage:
+        - keyCertSign
+      key_usage_critical: true
+    register: ca_csr
+  
+  - name: Create self-signed CA certificate from CSR
+    community.crypto.x509_certificate:
+      path: "{{ ca_crt }}"
+      csr_content: "{{ ca_csr.csr }}"
+      privatekey_path: "{{ ca_key }}"
+      provider: selfsigned
+
+  when: not ca_certificate_exists.stat.exists or (ca_certificate_info is defined and (ca_certificate_info.subject.commonName != ca_cn or ca_certificate_info.subject.organizationalUnitName != ca_ou))
+
+- name: Re-Read existing certificate
+  community.crypto.x509_certificate_info:
+    path: "{{ ca_crt }}"
+  register: ca_certificate_info
+
+- name: Assert certificate is as required
+  assert:
+    that:
+      - "ca_certificate_info.subject.commonName == ca_cn"
+      - "ca_certificate_info.subject.organizationalUnitName == ca_ou"
+
+- name: Check whether certificate exists
+  stat:
+    path: "{{ kc_crt }}"
+  register: certificate_exists
+
+- name: Read existing certificate if exists
+  slurp:
+    src: "{{ kc_crt }}"
+  when: certificate_exists.stat.exists
+  register: certificate
+
+- name: Read existing certificate if exists
+  community.crypto.x509_certificate_info:
+    path: "{{ kc_crt }}"
+  when: certificate_exists.stat.exists
+  register: certificate_info
+
+- block:
+  - name: Create private key for new certificate
+    community.crypto.openssl_privatekey:
+      path: "{{ kc_key }}"
+  
+  - name: Create certificate signing request (CSR) for new certificate
+    community.crypto.openssl_csr_pipe:
+      privatekey_path: "{{ kc_key }}"
+      common_name: "{{ cert_user }}"
+      organization_name: "{{ cert_group }}"
+    register: csr
+  
+  - name: Sign certificate with our CA
+    community.crypto.x509_certificate_pipe:
+      content: "{{ (certificate.content | b64decode) if certificate_exists.stat.exists else omit }}"
+      csr_content: "{{ csr.csr }}"
+      provider: ownca
+      ownca_path: "{{ ca_crt }}"
+      ownca_privatekey_path: "{{ ca_key }}"
+      ownca_not_after: "+{{ ca_validity }}d"
+    register: certificate
+  
+  - name: Write certificate to file
+    copy:
+      dest: "{{ kc_crt }}"
+      content: "{{ certificate.certificate }}"
+
+  when: not certificate_exists.stat.exists or (certificate_info is defined and (certificate_info.subject.commonName != cert_user or certificate_info.subject.organizationName != cert_group))
+
+- name: Re-Read existing certificate
+  community.crypto.x509_certificate_info:
+    path: "{{ kc_crt }}"
+  register: certificate_info
+
+- name: Assert certificate is as required
+  assert:
+    that:
+      - "certificate_info.subject.commonName == cert_user"
+      - "certificate_info.subject.organizationName == cert_group"

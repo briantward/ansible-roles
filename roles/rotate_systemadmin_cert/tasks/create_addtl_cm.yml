@@ -1,0 +1,40 @@
+- name: create additional CA configmap
+  k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: # consider using generateName, subsequent broken reruns could overwrite this
+        name: "admin-kubeconfig-client-ca-{{ ca_name }}"
+        namespace: openshift-config
+      data:
+        ca-bundle.crt: "{{ lookup('file','{{ ca_crt }}') }}"
+
+- name: patch the APIServer
+  kubernetes.core.k8s:
+    definition:
+      kind: apiserver
+      apiVersion: config.openshift.io/v1
+      metadata:
+        name: cluster
+      spec:
+        clientCA: 
+          name: "admin-kubeconfig-client-ca-{{ ca_name }}" 
+  register: apiserver
+
+- name: Sleep for a moment to allow system to register change
+  ansible.builtin.wait_for:
+    timeout: 15
+  when: apiserver.changed
+
+- name: Check controller operator
+  k8s_info:
+    api_version: config.openshift.io/v1
+    kind: ClusterOperator
+    name: openshift-controller-manager
+  register: co
+  until: 
+    - co.resources[0].status.conditions | selectattr('type','==','Progressing') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Degraded') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Available') | map(attribute='status') | first == 'True'
+  retries: 30
+  delay: 10

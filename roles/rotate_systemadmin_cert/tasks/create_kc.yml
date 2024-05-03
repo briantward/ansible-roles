@@ -1,0 +1,27 @@
+- name: "remove stale temp kubeconfig"
+  file:
+    state: absent
+    path: "{{ kc_dir }}/kubeconfig.edit"
+
+- name: "Backup existing kubeconfig"
+  copy:
+    src: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    dest: "{{ kc_dir }}/kubeconfig-backup.{{ ansible_date_time.iso8601_basic_short }}"
+
+- name: "Create working copy of kubeconfig"
+  shell: "oc config new-admin-kubeconfig >> {{ kc_dir }}/kubeconfig.edit"
+
+- name: "Set certificate based user and credentials"
+  shell: "oc config set-credentials admin --client-certificate='{{ kc_crt }}' --client-key='{{ kc_key }}' --embed-certs"
+  environment: 
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.edit"
+
+- name: "Create new kubeconfig"
+  copy:
+    src: "{{ kc_dir }}/kubeconfig.edit"
+    dest: "{{ kc_dir }}/kubeconfig.new"
+
+- name: "remove temp kubeconfig"
+  file:
+    state: absent
+    path: "{{ kc_dir }}/kubeconfig.edit"

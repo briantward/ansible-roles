@@ -1,0 +1,174 @@
+#- name: Validate existing kubeconfig works
+#  k8s_info:
+#    api_version: config.openshift.io/v1
+#    kind: APIServer
+#    name: cluster
+#  register: get_apiserver
+#  environment: 
+#    KUBECONFIG: "{{ kc_existing_revoke }}"
+
+- name: get the APIServer to see if any additional CA configmaps exist
+  kubernetes.core.k8s_info:
+    api_version: config.openshift.io/v1
+    kind: APIServer
+    name: cluster
+  register: apiserver
+
+- fail:
+    msg: "Did not find any additional client CAs. Will not remove your only client CA."
+  when: apiserver.resources[0].spec.clientCA is not defined
+
+- set_fact:
+    kc_existing: "{{ lookup('ansible.builtin.file',kc_existing_revoke) | from_yaml }}"
+- set_fact:
+    kc_existing_certs: "{{ kc_existing.users | selectattr('user') | map(attribute='user.client-certificate-data') | unique }}"
+
+- set_fact:
+    kc_existing_certs_decoded: "{{ kc_existing_certs_decoded | default([]) + [(item | b64decode)] }}"
+  loop: "{{ kc_existing_certs }}"
+
+- name: Read existing certificates from your kubeconfig
+  community.crypto.x509_certificate_info:
+    content: "{{ item }}"
+  loop: "{{ kc_existing_certs_decoded }}"
+  register: kc_existing_x509_info
+
+- set_fact:
+    found_cas: "{{ kc_existing_x509_info.results | map(attribute='authority_key_identifier') | unique }}"
+
+- fail:
+    msg: "Found more than one CA in your kubeconfig.  Please provide a kubeconfig with one CA to revoke."
+  when: (found_cas | length) > 1 or found_cas[0] == ""
+
+- set_fact:
+    apiserver_clientCA: "{{ apiserver.resources[0].spec.clientCA.name }}"
+
+- name: get CA configmap
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: "{{ apiserver_clientCA }}"
+    namespace: openshift-config
+  register: apiserver_clientCA_addtl_cm
+
+- set_fact:
+    found_ca_on_api_addtl_cm: "{{ apiserver_clientCA_addtl_cm.resources[0].data['ca-bundle.crt'] }}"
+
+- name: Read existing CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ found_ca_on_api_addtl_cm }}"
+  register: apiserver_existing_addtl_ca_x509_info
+
+- set_fact:
+    found_ca_id_api_addtl_cm: "{{ apiserver_existing_addtl_ca_x509_info.subject_key_identifier }}"
+
+- name: Get the existing CA
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: "admin-kubeconfig-client-ca"
+    namespace: openshift-config
+  register: apiserver_clientCA_cm
+
+- set_fact:
+    found_ca_on_api: "{{ apiserver_clientCA_cm.resources[0].data['ca-bundle.crt'] }}"
+
+- name: Read existing CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ found_ca_on_api }}"
+  register: apiserver_existing_ca_x509_info
+
+- set_fact:
+    found_ca_id_api: "{{ apiserver_existing_ca_x509_info.subject_key_identifier }}"
+
+- fail:
+    msg: "The additional CA matches the CA you are trying to revoke. Please ensure the additional CA is the new CA"
+  when: found_ca_id_api_addtl_cm == found_cas[0]
+
+# if there is an addtl cm that is not a matching CA and the API client CA does match, then overwrite the API client CA wiht the addtl cm, verify success, then remove the addtl cm
+
+- name: Revoke old CA by replacing it with the new one
+  k8s:
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "admin-kubeconfig-client-ca"
+        namespace: openshift-config
+      data:
+        ca-bundle.crt: "{{ found_ca_on_api_addtl_cm }}"
+  register: revoked
+  when: found_ca_id_api == found_cas[0]
+
+- name: Sleep for a moment to allow system to register change
+  ansible.builtin.wait_for:
+    timeout: 15
+  when: revoked.changed
+
+- name: Check controller operator
+  k8s_info:
+    api_version: config.openshift.io/v1
+    kind: ClusterOperator
+    name: openshift-controller-manager
+  register: co
+  until: 
+    - co.resources[0].status.conditions | selectattr('type','==','Progressing') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Degraded') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Available') | map(attribute='status') | first == 'True'
+  retries: 30
+  delay: 10
+  when: revoked.changed
+  environment: 
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
+
+- name: Validate existing kubeconfig now fails
+  k8s_info:
+    kind: apiServer
+  register: get_apiserver
+  failed_when: get_apiserver.resources is defined
+  environment: 
+    KUBECONFIG: "{{ kc_existing_revoke }}"
+  
+- name: remove the APIserver patch for the additional CA configmap
+  kubernetes.core.k8s_json_patch:
+    kind: apiserver
+    api_version: config.openshift.io/v1
+    name: cluster
+    patch:
+      - op: replace
+        path: /spec/clientCA
+        value: {}
+  when: revoked.changed
+  register: removed_addtl_ca
+  environment: 
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
+
+- name: Sleep for a moment to allow system to register change
+  ansible.builtin.wait_for:
+    timeout: 15
+  when: removed_addtl_ca.changed
+
+- name: Check controller operator
+  k8s_info:
+    api_version: config.openshift.io/v1
+    kind: ClusterOperator
+    name: openshift-controller-manager
+  register: co
+  until: 
+    - co.resources[0].status.conditions | selectattr('type','==','Progressing') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Degraded') | map(attribute='status') | first == 'False'
+    - co.resources[0].status.conditions | selectattr('type','==','Available') | map(attribute='status') | first == 'True'
+  retries: 30
+  delay: 10
+  when: removed_addtl_ca.changed
+  environment: 
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
+
+- name: remove the additional CA configmap
+  k8s:
+    kind: ConfigMap
+    name: "admin-kubeconfig-client-ca-{{ ca_name }}"
+    namespace: openshift-config
+    state: absent
+  environment: 
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
