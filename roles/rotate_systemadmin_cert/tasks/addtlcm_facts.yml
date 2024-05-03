@@ -1,0 +1,44 @@
+- name: get the APIServer to see if any additional CA configmaps exist
+  kubernetes.core.k8s_info:
+    api_version: config.openshift.io/v1
+    kind: APIServer
+    name: cluster
+  register: apiserver
+
+#- fail:
+#    msg: "Did not find any additional client CAs. Will not remove your only client CA."
+#  when: apiserver.resources[0].spec.clientCA is not defined
+
+- set_fact:
+    apiserver_clientCA: "{{ apiserver.resources[0].spec.clientCA.name }}"
+  when: apiserver.resources[0].spec.clientCA is defined
+
+- name: get CA configmap
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: "{{ apiserver_clientCA }}"
+    namespace: openshift-config
+  register: apiserver_clientCA_addtl_cm
+  when: apiserver_clientCA is defined
+
+- set_fact:
+    found_ca_on_api_addtl_cm: "{{ apiserver_clientCA_addtl_cm.resources[0].data['ca-bundle.crt'] }}"
+  when: 
+    - apiserver_clientCA_addtl_cm is defined
+    - apiserver_clientCA_addtl_cm.resources is defined
+    - apiserver_clientCA_addtl_cm.resources | length > 0
+
+- name: Read existing CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ found_ca_on_api_addtl_cm }}"
+  register: apiserver_existing_addtl_ca_x509_info
+  when: found_ca_on_api_addtl_cm is defined
+
+- set_fact:
+    found_ca_id_api_addtl_cm: "{{ apiserver_existing_addtl_ca_x509_info.subject_key_identifier }}"
+  when: 
+    - apiserver_clientCA_addtl_cm is defined
+    - apiserver_clientCA_addtl_cm.resources is defined
+    - apiserver_clientCA_addtl_cm.resources | length > 0
+    - apiserver_existing_addtl_ca_x509_info is defined

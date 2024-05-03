@@ -1,0 +1,18 @@
+- set_fact:
+    kc_existing: "{{ lookup('ansible.builtin.file',kc_existing_revoke) | from_yaml }}"
+
+- set_fact:
+    kc_existing_certs: "{{ kc_existing.users | selectattr('user') | map(attribute='user.client-certificate-data') | unique }}"
+
+- set_fact:
+    kc_existing_certs_decoded: "{{ kc_existing_certs_decoded | default([]) + [(item | b64decode)] }}"
+  loop: "{{ kc_existing_certs }}"
+
+- name: Read existing certificates from your kubeconfig
+  community.crypto.x509_certificate_info:
+    content: "{{ item }}"
+  loop: "{{ kc_existing_certs_decoded }}"
+  register: kc_existing_x509_info
+
+- set_fact:
+    found_cas: "{{ kc_existing_x509_info.results | map(attribute='authority_key_identifier') | unique }}"

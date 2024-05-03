@@ -1,0 +1,20 @@
+- name: Get the existing CA
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: "admin-kubeconfig-client-ca"
+    namespace: openshift-config
+  register: apiserver_clientCA_cm
+
+- set_fact:
+    found_ca_on_api: "{{ apiserver_clientCA_cm.resources[0].data['ca-bundle.crt'] }}"
+
+- name: Read existing CA certificate
+  community.crypto.x509_certificate_info:
+    content: "{{ found_ca_on_api }}"
+  register: apiserver_existing_ca_x509_info
+
+- set_fact:
+    found_ca_id_api: "{{ apiserver_existing_ca_x509_info.subject_key_identifier }}"
+
+

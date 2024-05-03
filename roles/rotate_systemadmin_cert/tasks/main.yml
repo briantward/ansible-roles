@@ -15,6 +15,20 @@
 
 - include_tasks: create_certs.yml
 
+- include_tasks: kc_facts.yml
+
+- fail:
+    msg: "Found more than one CA in your kubeconfig.  Please provide a kubeconfig with one CA to revoke."
+  when: found_cas | length > 1
+
+- include_tasks: addtlcm_facts.yml
+
+- fail:
+    msg: "The additional CA matches the CA you are trying to revoke. Please ensure the additional CA is the new CA"
+  when: found_ca_id_api_addtl_cm is defined and found_ca_id_api_addtl_cm == found_cas[0]
+
+- include_tasks: apicm_facts.yml
+
 - stat:
     path: "{{ kc_dir }}/kubeconfig.new"
   register: kc_new
@@ -23,6 +37,7 @@
   when: not kc_new.stat.exists
 
 - include_tasks: create_addtl_cm.yml
+  when: found_ca_id_api != new_ca_id
 
 - name: Validate new kubeconfig works
   k8s_info:
@@ -31,5 +46,9 @@
     name: cluster
   environment: 
     KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
+
+- fail:
+    msg: "The API CA you are attempting to revoke does not match your kubeconfig"
+  when: found_ca_id_api != found_cas[0]
 
 - include_tasks: revoke.yml

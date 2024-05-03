@@ -38,3 +38,5 @@
     - co.resources[0].status.conditions | selectattr('type','==','Available') | map(attribute='status') | first == 'True'
   retries: 30
   delay: 10
+
+- include_tasks: roles/rotate_systemadmin_cert/tasks/addtlcm_facts.yml

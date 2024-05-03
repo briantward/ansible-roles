@@ -42,6 +42,9 @@
     path: "{{ ca_crt }}"
   register: ca_certificate_info
 
+- set_fact:
+    new_ca_id: "{{ ca_certificate_info.subject_key_identifier }}"
+
 - name: Assert certificate is as required
   assert:
     that:
