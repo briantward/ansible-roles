@@ -8,7 +8,8 @@ If you only want a second administrator kubeconfig signed by the same CA certifi
 
   $ oc config new-admin-kubeconfig
 
-As a result of the above feature, this role will not provide any feature to only create a new admin certificate from the existing CA.  
+As a result of the above feature, this role will not provide any feature to only create a new admin certificate from the existing CA.
+
 === Requirements
 
 . `oc` version >= 4.14.0
