@@ -2,33 +2,35 @@
 
 When OpenShift is provisioned, the installer creates a kubeconfig file (located at `<install-dir>/auth/kubeconfig`) that contains certificate-based authentication as a cluster-admin.  Inside that kubeconfig file you will find an "admin" or "system:admin" user with a certificate and key to authenticate against the OpenShift API server.  You should consider this your root-level break glass access. After you use the account to configure the authentication modules you need, you should store this file in a secure location and not use it again unless absolutely necessary.  This kubeconfig file IS NOT the same authentication as the kubeadmin account.
 
-This role rotates the CA that signed your original or existing administrator kubeconfig certificate. This is useful for scenarios where you have exposed your certificate or shared it with team members that now need to be revoked from permission.  You must revoke the CA that signed the administrator certificate in order to invalidate that certificate.  It is not sufficient just to create a new administrator certificate because the old certificate will still be trusted.  Therefore, to create a new administrator certificate that works, you must both create a new CA certificate and a new administrator certificate signed by that new CA certificate.  This role creates both certificates required and uploads the CA to the kube API server, validates the new working certificate, then revokes the old CA by removing it from the kube API server.  You must specify the path to the kubeconfig file you want revoked, or specify the CA name you want revoked.  
+This role rotates the CA that signed your original or existing administrator kubeconfig certificate. This is useful for scenarios where you have exposed your certificate or shared it with team members that now need to be revoked from permission.  You must revoke the CA that signed the administrator certificate in order to invalidate that certificate.  It is not sufficient just to create a new administrator certificate because the old certificate will still be trusted.  Therefore, to create a new administrator certificate that works, you must both create a new CA certificate and a new administrator certificate signed by that new CA certificate.  This role creates both certificates required and uploads the CA to the kube API server, validates the new working certificate, then revokes the old CA by removing it from the kube API server.  You must specify the path to the kubeconfig file you want revoked.
 
 If you only want a second administrator kubeconfig signed by the same CA certificate, as of version 4.14, you can simply do the following:
 
   $ oc config new-admin-kubeconfig
 
 As a result of the above feature, this role will not provide any feature to only create a new admin certificate from the existing CA.  
-
 === Requirements
 
-A valid administrator KUBECONFIG session established with the cluster you want to work on.  This does not need to be the administrator certificate kubeconfig but it must have cluster-admin permissions to operate on the APIServer object.
+. `oc` version >= 4.14.0
 
+. A valid administrator KUBECONFIG session established with the cluster you want to work on.  This does not need to be the administrator certificate kubeconfig but it must have cluster-admin permissions to operate on the APIServer object. I recommend this not be the kubeconfig you are about to revoke, as the role executed would not be functionally idempotent. 
++
 E.G. 
 
   $ export KUBECONFIG=/some/location/kubeconfig
 
-You must provide a path to a folder to store the new CA certificate, administrator certificate, and new administrator kubeconfig file.  
-
+. You must provide a path to a folder to store the new CA certificate, administrator certificate, and new administrator kubeconfig file.
++
 ----
 cert_working_dir: "~/ocp-kubeconfig-cert"
 kc_working_dir: "~/ocp-kubeconfig-cert"
 ----
 
-You must also provide a path to an existing kubeconfig file that contains the original administrator certificate, or you may provide the CA name that signed the certificate you which to revoke.  The role will error out if either is missing or does not match what currently exists on the cluster.
-
- kc_existing_revoke: ""
-
+. You must also provide a path to an existing kubeconfig file that contains the original administrator certificate, or you may provide the CA name that signed the certificate you which to revoke.  The role will error out if either is missing or does not match what currently exists on the cluster.
++
+----
+kc_existing_revoke: ""
+----
 
 === Role Variables
 
@@ -58,7 +60,6 @@ kc_existing_revoke: ""
 
 === Example Playbook
 
-
 ----
 ---
 - name: "rotate system:admin cert"
@@ -66,6 +67,13 @@ kc_existing_revoke: ""
   tasks:
   - ansible.builtin.include_role:
       name: rotate_systemadmin_cert
+----
+
+A call to a playbook might look like this:
+
+----
+export KUBECONFIG=/home/user/kubeconfig
+ansible-playbook rotate_kubeconfig.yaml -e kc_existing_revoke=/home/user/kubeconfig.old -e cert_working_dir="/home/user/ocp-cert-1" -e kc_working_dir="~/ocp-cert-1"
 ----
 
 === License
