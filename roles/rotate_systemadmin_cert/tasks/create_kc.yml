@@ -1,36 +1,12 @@
 - name: "Create working copy of kubeconfig"
   shell: "oc config new-admin-kubeconfig > {{ kc_dir }}/kubeconfig.new"
 
+- name: "Update proper CA bundle"
+  shell: "oc config refresh-ca-bundle"
+  environment:
+    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
+
 - name: "Set certificate based user and credentials"
   shell: "oc config set-credentials admin --client-certificate='{{ kc_crt }}' --client-key='{{ kc_key }}' --embed-certs"
   environment:
     KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
-
-- name: "Update proper CA bundle"
-  shell: "oc config refresh-ca-bundle"
-  environment:
-    KUBECONFIG: "{{ kc_existing_revoke }}"
-
-- name: "Get current context"
-  shell: "oc config current-context"
-  register: current_context
-  environment:
-    KUBECONFIG: "{{ kc_existing_revoke }}"
-
-- name: "Get the current cluster"
-  shell: "oc config view -o jsonpath='{.contexts[?(@.name == \"{{ current_context.stdout }}\")].context.cluster}'"
-  register: current_cluster
-  environment:
-    KUBECONFIG: "{{ kc_existing_revoke }}"
-
-- name: "Get cluster certificate-authority-data"
-  shell: "oc config view -o jsonpath='{.clusters[?(@.name == \"{{ current_cluster.stdout }}\")].cluster.certificate-authority-data}' --flatten"
-  register: certificate_authority_data
-  environment:
-    KUBECONFIG: "{{ kc_existing_revoke }}"
-
-- name: "Update CA data on new kubeconfig"
-  shell: "oc config set clusters.cluster.certificate-authority-data {{ certificate_authority_data.stdout }}"
-  environment:
-    KUBECONFIG: "{{ kc_dir }}/kubeconfig.new"
-
